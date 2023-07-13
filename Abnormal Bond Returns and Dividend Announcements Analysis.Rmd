@@ -1,0 +1,169 @@
+---
+title: "Abnormal Bond Returns and Dividend Announcements Analysis"
+output: word_document
+date: "2023-06-16"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,message = FALSE, warning = FALSE)
+```
+
+## Loading Libraies and Data
+```{r}
+library(readxl)
+library(readr)
+library(tidyverse)
+library(zoo)
+
+# Loading Data
+df1<-read_excel("C:\\Users\\user\\Downloads\\Bond_Fundamentals_final-1.xlsx")
+df2<-read_excel("C:\\Users\\user\\Downloads\\DividendAnnouncements.xlsx")
+# Loading and Cleaning the trace price dataset
+csv_lines <- readLines("C:\\Users\\user\\Downloads\\trace_daily_r_CP.csv")
+split_lines <- strsplit(csv_lines, ",")
+num_columns <- max(lengths(split_lines))
+df <- data.frame(matrix(ncol = num_columns, nrow = length(split_lines), dimnames = list(NULL, paste0("V", 1:num_columns))))
+for (i in 1:length(split_lines)) {
+  df[i, 1:length(split_lines[[i]])] <- split_lines[[i]]
+}
+
+```
+
+## Data Cleaning and Preprocessing
+
+```{r}
+# Remove unnecessary rows
+df<-df[,-1]
+df1<-df1[,-1]
+
+# Define a list of new column names
+new_column_names <- c("cusip_id", "trd_exctn_dt", "TWP", "TWY", "vol_day", "n_day", "maturity", "PERMNO", "RATING_SPR", "RATING_FR", "RATING_MR", "moody_numeric", "sp_numeric", "fitch_numeric", "RTNG")
+
+# Assign the new column names to the data frame
+colnames(df) <- new_column_names
+
+
+# Removev missing values
+df<-df[-1,]
+# Remove quotation marks from cusip_id and RTNG columns
+df$cusip_id <- gsub("\"", "", df$cusip_id)
+df$RTNG <- gsub("\"", "", df$RTNG)
+df$RATING_SPR <- gsub('"', '', df$RATING_SPR)
+df$RATING_FR <- gsub('"', '', df$RATING_FR)
+df$RATING_MR <- gsub('"', '', df$RATING_MR)
+df$moody_numeric <- gsub('"', '', df$moody_numeric)
+df$sp_numeric <- gsub('"', '', df$sp_numeric)
+df$fitch_numeric <- gsub('"', '', df$fitch_numeric)
+colnames(data[,9:14])
+# Convert "NA" strings to missing values
+df[df == "NA"] <- NA
+
+data <- df[complete.cases(df), ]
+head(data)  # Print the data frame with updated column names
+
+
+# Merge datasets
+merged_data <- merge(data, df1, by = c("cusip_id"))
+# Change column name from 'ID' to 'Organization of Risk PermID'
+colnames(df2)[colnames(df2) == "ID"] <- "Organization of Risk PermID"
+# Add the dividend announcement to data
+merged_data <- merge(merged_data, df2, by = c("Organization of Risk PermID"))
+
+# Filter bonds that are not rated
+filtered_data <- merged_data[!is.na(merged_data$RTNG), ]
+
+# Consider trades of institutions with trade volume >= 100k
+filtered_data <- filtered_data[filtered_data$vol_day >= 100000, ]
+# Convert "TWP" column to numeric
+filtered_data$TWP <- as.numeric(filtered_data$TWP)
+# Convert "TWP" column to numeric
+filtered_data$TWP <- as.numeric(filtered_data$TWP)
+filtered_data$n_day <- as.numeric(filtered_data$n_day)
+# Calculate bond returns using "n_day" as a substitute for "AAI"
+filtered_data$returns <- with(filtered_data, (TWP - lag(TWP) + n_day) / lag(TWP))
+
+
+# Calculate PBR. Apply the mean-adjusted return model
+filtered_data$PBR <- filtered_data$returns - filtered_data$`Dividend Amount`
+# Calculate the mean expected excess return (EBR)
+estimation_period <- 5  # Number of periods for EBR calculation
+filtered_data <- filtered_data %>%
+  group_by(cusip_id) %>%
+  arrange(trd_exctn_dt) %>%
+  mutate(EBR = rollmean(PBR, k = estimation_period, fill = NA, align = "right", na.rm = TRUE))
+
+# Calculate the abnormal bond return (ABR)
+filtered_data$ABR <- filtered_data$PBR - filtered_data$EBR
+```
+
+## Data Analysis
+```{r}
+# Step 1: Create matching portfolios based on bond ratings and time-to-maturity
+
+# Using Lehman Brothers indexes as benchmarks
+matching_portfolios <- filtered_data %>%
+  group_by(RTNG, maturity) %>%
+  summarise(average_PBR = mean(PBR, na.rm = TRUE))  # Adjust as per your specific methodology
+
+
+# Step 2: Calculate the expected return (EBR) for each bond based on the matching portfolios
+
+# Using the matching portfolios as the reference
+filtered_data <- filtered_data %>%
+  left_join(matching_portfolios, by = c("RTNG", "maturity")) %>%
+  mutate(EBR = ifelse(!is.na(average_PBR), average_PBR, NA))  # Assign EBR from matching portfolios, NA if no match
+
+
+# Step 3: Calculate the abnormal bond return (ABR)
+
+filtered_data$ABR <- filtered_data$PBR - filtered_data$EBR
+
+
+# Step 4: Analyze the correlation between dividend announcements and abnormal bond returns
+# Remove NA from the "ABR" column
+filtered_data_no_na <- filtered_data[complete.cases(filtered_data$ABR), ]
+# correlation analysis
+correlation <- cor(filtered_data_no_na$`Dividend Amount`, filtered_data_no_na$ABR)
+# Perform statistical tests such as Corrado-Test to test the significance of abnormal returns
+
+# Print correlation result
+cat("Correlation between dividend announcements and abnormal bond returns:", correlation, "\n")
+
+# Perform the Corrado Test
+
+# Step 1: Fit a regression model to estimate abnormal returns
+model <- lm(ABR ~ `Dividend Amount`, data = filtered_data_no_na)
+
+# Step 2: Extract the coefficients and standard errors from the model
+coefficients <- coef(model)
+std_errors <- summary(model)$coefficients[, "Std. Error"]
+
+# Step 3: Perform hypothesis testing to assess the significance of abnormal returns
+t_statistic <- coefficients["`Dividend Amount`"] / std_errors["`Dividend Amount`"]
+p_value <- 2 * pt(-abs(t_statistic), df = model$df.residual)
+
+# Step 4: Print the results
+cat("Corrado Test Results:\n")
+cat("Estimate:", coefficients["`Dividend Amount`"], "\n")
+cat("Standard Error:", std_errors["`Dividend Amount`"], "\n")
+cat("t-value:", t_statistic, "\n")
+cat("p-value:", p_value, "\n")
+
+# Perform T-Test
+t_test <- t.test(filtered_data_no_na$ABR)
+cat("T-Test Results:\n")
+print(t_test)
+```
+
+The Corrado test's results are as follows:
+
+Estimate: The "Dividend Amount" variable's estimated coefficient is -0.9998212. This suggests that, on average, a one-unit increase in the dividend amount corresponds to a fall in the anomalous returns of about -0.9998212.
+
+Standard Error: The "Dividend Amount" coefficient's standard error is 0.0006172603. The estimated coefficient's accuracy or degree of uncertainty is represented by this. More accurate estimations are shown by smaller standard errors.
+
+t-value: The "Dividend Amount" coefficient's t-value is -1619.772. It is obtained by subtracting the standard error from the estimated coefficient. The t-value assesses the coefficient's significance and evaluates if it deviates statistically from zero. The t-value in this instance is extremely high, showing a significant correlation between  between the dividend amount and abnormal returns.
+
+The stated p-value is zero, which is less than the usual significance level of 0.05. If the null hypothesis (no relationship) is true, the p-value indicates the likelihood of seeing a t-value as extreme as -1619.772 or more extreme. With a p-value of 0, there is strong evidence to reject the null hypothesis and draw the conclusion that the dividend amount and anomalous returns are significantly correlated.
+
+In conclusion, the Corrado test results show that the association between the dividend amount and anomalous returns is quite significant. According to the computed coefficient, smaller abnormal returns are linked to greater dividend amounts. Strong proof of the relationship's statistical significance is provided by its small standard error, high t-value, and extremely low p-value.
+
