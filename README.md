@@ -1,1 +1,7 @@
 # Abnormal-Bond-Returns-and-Dividend-Announcements-Analysis
+
+The purpose of the project is to analyze abnormal bond returns in relation to dividend announcements. The project involves loading and cleaning datasets related to bond fundamentals, dividend announcements, and bond trading data. The data is preprocessed to remove unnecessary rows, handle missing values, and convert columns to the appropriate data types. The datasets are then merged, and further filtering is applied to consider trades of institutions with a trade volume greater than or equal to 100,000.
+
+The project proceeds with calculating various measures such as bond returns, price-to-book ratio (PBR), mean-adjusted return (EBR), and abnormal bond return (ABR). Matching portfolios are created based on bond ratings and time-to-maturity, and the expected return (EBR) is calculated for each bond based on the matching portfolios. The abnormal bond return (ABR) is then calculated by subtracting the expected return (EBR) from the bond returns (PBR).
+
+The project's data analysis phase focuses on examining the correlation between dividend announcements and abnormal bond returns. The dataset is further processed to remove missing values, and the correlation between dividend announcements and abnormal bond returns is computed. The Corrado Test and T-Test are performed to assess the significance of abnormal returns in relation to dividend announcements. The results of these statistical tests are provided, indicating a significant correlation between the dividend amount and abnormal bond returns.
